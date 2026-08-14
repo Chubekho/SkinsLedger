@@ -1,0 +1,27 @@
+# deps
+node_modules/
+
+# build
+dist/
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
+
+# test
+coverage/
+
+# editor
+.vscode/
+.idea/
+
+#docs
+docs/
