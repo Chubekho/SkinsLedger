@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:18-alpine # bản ổn định mới nhất hiện tại (kiểm tra 08/2026). Ghim số cụ thể, KHÔNG dùng "latest"
+    container_name: skinsledger-db # đặt tên cố định để gõ `docker exec skinsledger-db ...` khỏi tra ID
+    restart: unless-stopped # máy khởi động lại thì container tự lên, trừ khi mình chủ động stop
+
+    environment:
+      # 3 biến này Postgres CHỈ đọc lần đầu tiên khởi tạo volume
+      POSTGRES_USER: admin # đổi sau khi volume đã có data thì KHÔNG ăn — phải db:nuke làm lại
+      POSTGRES_PASSWORD: devpass # dev only, không phải password thật, không sao nếu lộ trong repo cá nhân
+      POSTGRES_DB: skinsledger
+
+    ports:
+      - "5433:5432"
+        # trái = port trên máy Mac, phải = port trong container
+        # dùng 5433 chứ không phải 5432 mặc định — tránh đụng Postgres cài bằng brew/Postgres.app
+
+    volumes:
+      - pgdata:/var/lib/postgresql
+        # named volume: data do Docker quản lý, không nằm trong thư mục project
+        # LƯU Ý: từ Postgres 18 trở đi mount vào /var/lib/postgresql (KHÔNG có /data)
+        # image tự tạo thư mục con theo version bên trong — để pg_upgrade sau này không vướng mount point
+        # nhờ named volume, `down` (không -v) giữ nguyên data, chỉ `down -v` mới xoá
+
+    healthcheck:
+      # Postgres mất vài giây mới sẵn sàng nhận kết nối sau khi container "chạy"
+      test: [ "CMD-SHELL", "pg_isready -U admin -d skinsledger" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata: # khai tên volume — Docker tự tạo nếu chưa có
