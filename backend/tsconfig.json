@@ -1,20 +1,21 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "types": ["node"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-
-    "rootDir": "./src",
-    "outDir": "./dist",
-
+    "target": "ES2022", // quyết định code trong dự án sẽ sử dụng cú pháp của phiên bản es bao nhiêu
+    "lib": [
+      "ES2022"
+    ], // quyết định api của phiên bản es nào sẽ được sử dụng
+    "types": [
+      "node"
+    ], // 
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rootDir": "./src", // source code nằm ở trong thư mục mà value khai báo (src/)
+    "outDir": "./dist", // output mà code được biên dịch sẽ nằm tại thư mục mà value khai báo  (dist/)
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "forceConsistentCasingInFileNames": true,
-
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "sourceMap": true
+    "noUncheckedIndexedAccess": true, // nếu bật (true) thì mảng arr[i] sẽ trả về T (Generic type) | undefined, mặc định tắt thì mảng chỉ trả về T.
+    "forceConsistentCasingInFileNames": true,   // bắt buộc thống nhất quy tắc đặt tên hoa thường cho các files (các files có phân biệt hoa thường)
+    "esModuleInterop": true, // cho phép các package cũ (viết dưới dạng commonjs) được import 
+    "skipLibCheck": true, // không kiểm tra type bên trong node_modules/
+    "sourceMap": true // chưa có tác dụng lúc dev (tsx tự lo) hay lúc typecheck (--noEmit không xuất file gì). Chỉ dùng khi build thật ở Bước 7: sinh kèm dist/*.js.map để lỗi production trỏ về đúng dòng .ts gốc
   }
 }
