@@ -19,9 +19,10 @@
     "sourceMap": true // chưa có tác dụng lúc dev (tsx tự lo) hay lúc typecheck (--noEmit không xuất file gì). Chỉ dùng khi build thật ở Bước 7: sinh kèm dist/*.js.map để lỗi production trỏ về đúng dòng .ts gốc
   },
   "exclude": [
-    "prisma.config.ts",
     "node_modules",
     "dist",
-    "generated"
+    "generated",
+    "prisma.config.ts",
+    "vitest.config.ts"
   ]
 }
