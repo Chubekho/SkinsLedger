@@ -25,3 +25,6 @@ coverage/
 
 #docs
 docs/
+
+#prisma
+/src/generated/prisma

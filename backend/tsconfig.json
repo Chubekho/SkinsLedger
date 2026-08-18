@@ -6,16 +6,22 @@
     ], // quyết định api của phiên bản es nào sẽ được sử dụng
     "types": [
       "node"
-    ], // 
+    ], // chỉ nạp global type của Node (console, process...), tắt auto-scan toàn bộ node_modules/@types/*
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "rootDir": "./src", // source code nằm ở trong thư mục mà value khai báo (src/)
     "outDir": "./dist", // output mà code được biên dịch sẽ nằm tại thư mục mà value khai báo  (dist/)
-    "strict": true,
+    "strict": true, // bật cả gói ~8 flag nghiêm ngặt, quan trọng nhất là strictNullChecks: bắt xử lý null trước khi dùng biến (vd acquired_price: Decimal | null)
     "noUncheckedIndexedAccess": true, // nếu bật (true) thì mảng arr[i] sẽ trả về T (Generic type) | undefined, mặc định tắt thì mảng chỉ trả về T.
-    "forceConsistentCasingInFileNames": true,   // bắt buộc thống nhất quy tắc đặt tên hoa thường cho các files (các files có phân biệt hoa thường)
+    "forceConsistentCasingInFileNames": true, // bắt buộc thống nhất quy tắc đặt tên hoa thường cho các files (các files có phân biệt hoa thường)
     "esModuleInterop": true, // cho phép các package cũ (viết dưới dạng commonjs) được import 
     "skipLibCheck": true, // không kiểm tra type bên trong node_modules/
     "sourceMap": true // chưa có tác dụng lúc dev (tsx tự lo) hay lúc typecheck (--noEmit không xuất file gì). Chỉ dùng khi build thật ở Bước 7: sinh kèm dist/*.js.map để lỗi production trỏ về đúng dòng .ts gốc
-  }
+  },
+  "exclude": [
+    "prisma.config.ts",
+    "node_modules",
+    "dist",
+    "generated"
+  ]
 }

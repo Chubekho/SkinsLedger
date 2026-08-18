@@ -15,16 +15,22 @@
     "db:down": "docker compose -f ../docker-compose.yml down",
     "db:nuke": "docker compose -f ../docker-compose.yml down -v",
     "db:logs": "docker compose -f ../docker-compose.yml logs -f db",
-    "db:psql": "docker exec -it skinsledger-db psql -U admin -d skinsledger"
+    "db:psql": "docker exec -it skinsledger-db psql -U admin -d skinsledger",
+    "prisma:generate": "prisma generate",
+    "prisma:studio": "prisma studio",
+    "prisma:migrate": "prisma migrate dev"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "dotenv": "^17.4.2",
+    "prisma": "^6.19.3",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "zod": "^4.4.3"
   }
 }
