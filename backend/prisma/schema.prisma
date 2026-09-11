@@ -7,3 +7,202 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// enums
+enum WalletKind {
+  STEAM_BALANCE
+  CASH
+}
+
+enum ActivityType {
+  OPENING_BALANCE
+  TOP_UP
+  PURCHASE
+  CONTAINER_CLAIM
+  WALLET_TRANSFER
+  DROP
+  TRADE_UP
+  UNBOXING
+  SALE
+  GIFT_OUT
+  LOST
+}
+
+enum ItemStatus {
+  HOLDING
+  SOLD
+  CONSUMED
+  WRITTEN_OFF
+}
+
+enum RateSource {
+  MANUAL
+  EXCHANGERATE_API
+}
+
+enum PriceSource {
+  STEAM
+  BUFF163
+  CSFLOAT
+  CSMONEY
+  SKINPORT
+}
+
+// models
+
+model Account {
+  id           Int      @id @default(autoincrement())
+  accountName  String   @unique @map("account_name")
+  steamId64    String?  @unique @map("steam_id64")
+  registeredAt DateTime @map("registered_at") @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  wallets           Wallet[]
+  activities        Activity[]
+  items             InventoryItem[]
+  sentMovements     ItemMovement[]  @relation("SenderAccount")
+  receivedMovements ItemMovement[]  @relation("ReceiverAccount")
+
+  @@map("accounts")
+}
+
+model Wallet {
+  id        Int        @id @default(autoincrement())
+  accountId Int?       @map("account_id")
+  name      String
+  kind      WalletKind
+  currency  String
+  isActive  Boolean    @default(true) @map("is_active")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  account Account? @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  transactions WalletTransaction[]
+
+  @@unique([accountId, kind, currency])
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id         Int      @id @default(autoincrement())
+  walletId   Int      @map("wallet_id")
+  activityId Int      @map("activity_id")
+  amount     Decimal  @db.Decimal(20, 8)
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  wallet   Wallet   @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Restrict)
+
+  @@index([walletId, occurredAt], map: "idx_wt_wallet_time")
+  @@index([activityId], map: "idx_wt_activity")
+  @@map("wallet_transactions")
+}
+
+model Activity {
+  id           Int          @id @default(autoincrement())
+  type         ActivityType
+  accountId    Int?         @map("account_id")
+  counterparty Json?        @db.JsonB
+  note         String?
+  occurredAt   DateTime     @map("occurred_at") @db.Timestamptz(3)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  account Account? @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  walletTransactions WalletTransaction[]
+  acquiredItems      InventoryItem[]     @relation("AcquiredActivity")
+  consumedItems      InventoryItem[]     @relation("ConsumedActivity")
+
+  @@index([accountId], map: "idx_act_account")
+  @@map("activities")
+}
+
+model InventoryItem {
+  // Định danh
+  id                 Int        @id @default(autoincrement())
+  name               String
+  marketHashName     String     @map("market_hash_name")
+  assetId            String?    @map("asset_id")
+  metadata           Json       @default("{}") @db.JsonB
+  // Vị trí & Vòng đời
+  accountId          Int        @map("account_id")
+  storageUnitId      Int?       @map("storage_unit_id")
+  acquiredActivityId Int        @map("acquired_activity_id")
+  consumedActivityId Int?       @map("consumed_activity_id")
+  // Giá vốn
+  acquiredPrice      Decimal?   @map("acquired_price") @db.Decimal(20, 8)
+  costCurrency       String?    @map("cost_currency")
+  costBasis          Decimal    @map("cost_basis") @db.Decimal(20, 8)
+  // Giá bán - chỉ có khi status = SOLD
+  salePrice          Decimal?   @map("sale_price") @db.Decimal(20, 8)
+  saleCurrency       String?    @map("sale_currency")
+  saleRefPrice       Decimal?   @map("sale_ref_price") @db.Decimal(20, 8)
+  saleRefCurrency    String?    @map("sale_ref_currency")
+  saleRate           Decimal?   @map("sale_rate") @db.Decimal(20, 8)
+  // Trạng thái (status)
+  status             ItemStatus
+  acquiredAt         DateTime   @map("acquired_at") @db.Timestamptz(3)
+  tradableAfter      DateTime?  @map("tradable_after") @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  account     Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  storageUnit InventoryItem? @relation("ItemInStorage", fields: [storageUnitId], references: [id], onDelete: Restrict)
+
+  acquiredActivity Activity  @relation("AcquiredActivity", fields: [acquiredActivityId], references: [id], onDelete: Restrict)
+  consumedActivity Activity? @relation("ConsumedActivity", fields: [consumedActivityId], references: [id], onDelete: Restrict)
+
+  storedItems   InventoryItem[] @relation("ItemInStorage")
+  itemMovements ItemMovement[]
+
+  @@index([status], map: "idx_items_status")
+  @@index([marketHashName], map: "idx_items_hash")
+  @@index([accountId], map: "idx_items_account")
+  @@index([assetId], map: "idx_items_asset")
+  @@index([storageUnitId], map: "idx_items_storage")
+  @@index([acquiredActivityId], map: "idx_items_acquired")
+  @@index([consumedActivityId], map: "idx_items_consumed")
+  @@map("inventory_items")
+}
+
+model ItemMovement {
+  id            Int       @id @default(autoincrement())
+  itemId        Int       @map("item_id")
+  fromAccountId Int       @map("from_account_id")
+  toAccountId   Int       @map("to_account_id")
+  holdEndsAt    DateTime? @map("hold_ends_at") @db.Timestamptz(3)
+  note          String?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  item InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  senderAccount   Account @relation("SenderAccount", fields: [fromAccountId], references: [id], onDelete: Restrict)
+  receiverAccount Account @relation("ReceiverAccount", fields: [toAccountId], references: [id], onDelete: Restrict)
+
+  @@index([itemId, createdAt], map: "idx_mov_item")
+  @@map("item_movements")
+}
+
+model ExchangeRate {
+  id            Int        @id @default(autoincrement())
+  baseCurrency  String     @map("base_currency")
+  quoteCurrency String     @map("quote_currency")
+  rate          Decimal    @db.Decimal(20, 8)
+  source        RateSource
+  fetchedAt     DateTime   @map("fetched_at") @db.Timestamptz(3)
+
+  @@unique([baseCurrency, quoteCurrency, source, fetchedAt])
+  @@map("exchange_rates")
+}
+
+model ItemPrice {
+  id             Int         @id @default(autoincrement())
+  marketHashName String      @map("market_hash_name")
+  source         PriceSource
+  price          Decimal     @db.Decimal(20, 8)
+  currency       String
+  fetchedAt      DateTime    @map("fetched_at") @db.Timestamptz(3)
+
+  @@unique([marketHashName, source, fetchedAt])
+  @@map("item_prices")
+}
