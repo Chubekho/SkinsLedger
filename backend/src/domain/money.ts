@@ -1,7 +1,7 @@
 // Vai trò: Hằng số + hàm thuần về tiền, không đụng DB — tránh mỗi service tự viết lại quy tắc làm tròn
+import { Prisma } from "../generated/prisma/client.js";
 
-import { Decimal } from "@prisma/client/runtime/library";
-
+type Decimal = Prisma.Decimal;
 type SupportedCurrency = "VND" | "EUR" | "USD" | "RMB";
 
 export const CURRENCY_SCALE: Record<SupportedCurrency, number> = {

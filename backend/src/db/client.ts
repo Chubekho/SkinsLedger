@@ -1,6 +1,6 @@
 // Vai trò: Tạo đúng 1 PrismaClient cho toàn app (singleton) — mọi nơi import chung 1 kết nối, không tự new PrismaClient() rải rác
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../generated/prisma/client.js";
 import { env } from "../config/env.js";
 
 export const prisma = new PrismaClient({

@@ -24,7 +24,8 @@ coverage/
 .idea/
 
 #docs
-docs/
+docs/*
+!docs/SCHEMA_DESIGN.md
 
 #prisma
-/src/generated/prisma
+backend/src/generated/prisma/
