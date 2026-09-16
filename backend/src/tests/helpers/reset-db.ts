@@ -1,7 +1,7 @@
 // src/tests/helpers/reset-db.ts
 import { prisma } from '../../db/client.js';
 
-const TABLES = [
+export const TABLES = [
   'item_movements',
   'inventory_items',
   'wallet_transactions',
