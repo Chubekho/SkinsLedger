@@ -2,7 +2,6 @@ import { z } from "zod";
 
 const envSchema = z.object({
   DATABASE_URL: z.url(), 
-  DATABASE_URL_TEST: z.url(),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

@@ -8,9 +8,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "postinstall": "prisma generate",
+    "postinstall": "npm run prisma:generate",
     "test": "dotenv -e .env.test -- vitest run",
-    "dev": "tsx watch --env-file=.env src/index.ts",
+    "dev": "tsx watch --env-file=.env.test src/index.ts",
     "smoke": "tsx --env-file=.env src/scripts/smoke.ts",
     "typecheck": "tsc --noEmit",
     "db:up": "docker compose -f ../docker-compose.yml up -d",
@@ -18,9 +18,13 @@
     "db:nuke": "docker compose -f ../docker-compose.yml down -v",
     "db:logs": "docker compose -f ../docker-compose.yml logs -f db",
     "db:psql": "docker exec -it skinsledger-db psql -U admin -d skinsledger",
+    "db:psql:test": "docker exec -it skinsledger-db psql -U admin -d skinsledger_test",
+    "db:seed": "tsx --env-file=.env src/scripts/seed-cli.ts",
+    "db:migrate:test": "dotenv -e .env.test -- npx prisma migrate deploy",
     "prisma:generate": "prisma generate",
-    "prisma:studio": "prisma studio",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:studio": "dotenv -e .env -- prisma studio",
+    "prisma:studio:test": "dotenv -e .env.test -- prisma studio",
+    "prisma:migrate": "dotenv -e .env -- prisma migrate dev"
   },
   "author": "",
   "license": "ISC",
