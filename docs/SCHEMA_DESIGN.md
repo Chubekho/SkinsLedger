@@ -38,14 +38,15 @@
 
 ## QUY ƯỚC TRIỂN KHAI — áp cho toàn bộ 8 bảng dưới đây
 
-| Loại dữ liệu  | Kiểu Prisma                                                                  | Ghi chú                                                                                   |
-| ------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Khoá chính    | `Int @id @default(autoincrement())`                                          | KHÔNG dùng `BigInt` — tránh lỗi `JSON.stringify` ở Bước 7                                 |
-| Tiền + tỷ giá | `Decimal @db.Decimal(20, 8)`                                                 | 12 số nguyên + 8 số lẻ. Một luật duy nhất cho mọi cột tiền                                |
-| Thời gian     | `DateTime @db.Timestamptz(3)`                                                | Prisma mặc định KHÔNG có timezone — phải khai rõ, tránh lệch giờ Mac (+7) vs server (UTC) |
-| JSON          | `Json @db.JsonB`                                                             | `metadata`, `counterparty` — jsonb query/index được, json thường thì không                |
-| Tên bảng/cột  | Model `PascalCase`, field `camelCase`, map `@map`/`@@map` xuống `snake_case` | SQL recipes trong file này copy-paste chạy thẳng, không cần dịch tên                      |
-| Chuỗi | `String` (không khai `@db.VarChar`) | `VARCHAR` trong file này = quy ước đọc. Prisma map ra `text` — Postgres lưu y hệt `varchar`. Giới hạn độ dài validate bằng Zod ở service |
+| Loại dữ liệu  | Kiểu Prisma                                                                  | Ghi chú                                                                                                                                                                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Khoá chính    | `Int @id @default(autoincrement())`                                          | KHÔNG dùng `BigInt` — tránh lỗi `JSON.stringify` ở Bước 7                                                                                                                                                                                               |
+| Tiền + tỷ giá | `Decimal @db.Decimal(20, 8)`                                                 | 12 số nguyên + 8 số lẻ. Một luật duy nhất cho mọi cột tiền                                                                                                                                                                                              |
+| Thời gian     | `DateTime @db.Timestamptz(3)`                                                | Prisma mặc định KHÔNG có timezone — phải khai rõ, tránh lệch giờ Mac (+7) vs server (UTC)                                                                                                                                                               |
+| JSON          | `Json @db.JsonB`                                                             | `metadata`, `counterparty` — jsonb query/index được, json thường thì không                                                                                                                                                                              |
+| Tên bảng/cột  | Model `PascalCase`, field `camelCase`, map `@map`/`@@map` xuống `snake_case` | SQL recipes trong file này copy-paste chạy thẳng, không cần dịch tên                                                                                                                                                                                    |
+| Chuỗi         | `String` (không khai `@db.VarChar`)                                          | `VARCHAR` trong file này = quy ước đọc. Prisma map ra `text` — Postgres lưu y hệt `varchar`. Giới hạn độ dài validate bằng Zod ở service                                                                                                                |
+| DB `DEFAULT`  | Chỉ `created_at`                                                             | `occurred_at` / `acquired_at` / `tradable_after` / `fetched_at` **KHÔNG** có default — là dữ kiện nghiệp vụ service phải chủ động truyền. `occurred_at` còn backdate được; default sẽ im lặng ghi hôm nay khi quên truyền → sổ cái sai mà không ai biết |
 
 ### Quy ước `ON DELETE` — áp cho toàn bộ FK
 
@@ -207,6 +208,12 @@ cost_currency ≠ sale_currency  →  KHÔNG tính profit
 | `WRITTEN_OFF` | _Mất trắng: tặng, bị scam, từ chối offer X-Ray_                     |
 
 **Trade-hold là trục độc lập, KHÔNG phải status.** Tính ở tầng đọc:
+
+> **Trade-hold = 7 ngày.** Hằng số `TRADE_HOLD_DAYS` ở `domain/trade-hold.ts`
+> (không nhét vào `money.ts` — đây là luật CS2, không phải luật tiền).
+> Dùng ở F4/F5/F6/F9/F10. Hàm luôn trả `Date` **mới**, không `setDate()` tại chỗ
+> trên object gốc.
+> ⚠️ **Chưa chốt:** tính từ `occurred_at` hay lúc nhập liệu — xem nợ kỹ thuật.
 
 ```sql
 CASE WHEN tradable_after IS NULL OR tradable_after <= NOW()
