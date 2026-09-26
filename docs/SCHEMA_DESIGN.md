@@ -1,6 +1,6 @@
 # SKINSLEDGER — THIẾT KẾ DATABASE
 
-**Version 3.2** — _cập nhật 08/09/2026 (chốt gốc 05/08/2026)_
+**Version 3.3** — _cập nhật 24/09/2026 (chốt gốc 05/08/2026)_
 
 ---
 
@@ -41,7 +41,7 @@
 | Loại dữ liệu  | Kiểu Prisma                                                                  | Ghi chú                                                                                                                                                                                                                                                 |
 | ------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Khoá chính    | `Int @id @default(autoincrement())`                                          | KHÔNG dùng `BigInt` — tránh lỗi `JSON.stringify` ở Bước 7                                                                                                                                                                                               |
-| Tiền + tỷ giá | `Decimal @db.Decimal(20, 8)`                                                 | 12 số nguyên + 8 số lẻ. Một luật duy nhất cho mọi cột tiền                                                                                                                                                                                              |
+| Tiền + tỷ giá | `Decimal @db.Decimal(20, 8)`                                                 | - 12 số nguyên + 8 số lẻ. Một luật duy nhất cho mọi cột tiền <br/> - Input vượt `CURRENCY_SCALE` → throw, không làm tròn. Làm tròn chỉ dùng cho phân bổ (chia lô, dư dồn item cuối).                                                                    |
 | Thời gian     | `DateTime @db.Timestamptz(3)`                                                | Prisma mặc định KHÔNG có timezone — phải khai rõ, tránh lệch giờ Mac (+7) vs server (UTC)                                                                                                                                                               |
 | JSON          | `Json @db.JsonB`                                                             | `metadata`, `counterparty` — jsonb query/index được, json thường thì không                                                                                                                                                                              |
 | Tên bảng/cột  | Model `PascalCase`, field `camelCase`, map `@map`/`@@map` xuống `snake_case` | SQL recipes trong file này copy-paste chạy thẳng, không cần dịch tên                                                                                                                                                                                    |
@@ -127,14 +127,14 @@
 | **occurred_at**  | DATETIME            | _Ngày xảy ra thực tế._ **Backdate được**                                                                                       |
 | **created_at**   | DATETIME            | _Ngày nhập liệu._ **Không sửa**                                                                                                |
 
-| Nhóm             | `type`                         |
-| ---------------- | ------------------------------ |
-| _Tiền vào_       | `OPENING_BALANCE`, `TOP_UP`    |
-| _Tiền ra_        | `PURCHASE`, `CONTAINER_CLAIM`  |
-| _Chuyển ví_      | `WALLET_TRANSFER`              |
-| _Không đổi tiền_ | `DROP`, `TRADE_UP`, `UNBOXING` |
-| _Đồ → tiền_      | `SALE`                         |
-| _Đồ mất trắng_   | `GIFT_OUT`, `LOST`             |
+| Nhóm             | `type`                                                         |
+| ---------------- | -------------------------------------------------------------- |
+| _Tiền vào_       | `OPENING_BALANCE`, `TOP_UP`                                    |
+| _Tiền ra_        | `PURCHASE`, `CONTAINER_CLAIM`                                  |
+| _Chuyển ví_      | `WALLET_TRANSFER`                                              |
+| _Không đổi tiền_ | `DROP`, `GIFT_IN`, `TRADE_UP`, `UNBOXING`, `OPENING_INVENTORY` |
+| _Đồ → tiền_      | `SALE`                                                         |
+| _Đồ mất trắng_   | `GIFT_OUT`, `LOST`                                             |
 
 ---
 
@@ -209,11 +209,9 @@ cost_currency ≠ sale_currency  →  KHÔNG tính profit
 
 **Trade-hold là trục độc lập, KHÔNG phải status.** Tính ở tầng đọc:
 
-> **Trade-hold = 7 ngày.** Hằng số `TRADE_HOLD_DAYS` ở `domain/trade-hold.ts`
-> (không nhét vào `money.ts` — đây là luật CS2, không phải luật tiền).
-> Dùng ở F4/F5/F6/F9/F10. Hàm luôn trả `Date` **mới**, không `setDate()` tại chỗ
-> trên object gốc.
-> ⚠️ **Chưa chốt:** tính từ `occurred_at` hay lúc nhập liệu — xem nợ kỹ thuật.
+> - **Trade-hold = 7 ngày.** Hằng số `TRADE_HOLD_DAYS` ở `domain/trade-hold.ts` không nhét vào `money.ts` — đây là luật CS2, không phải luật tiền.
+> - Dùng ở F4/F5/F6/F9/F10. Hàm luôn trả `Date` **mới**, không `setDate()` tại chỗ trên object gốc.
+> - Trade-hold tính từ `occurred_at` (cùng logic _backdate_ - `F1`)
 
 ```sql
 CASE WHEN tradable_after IS NULL OR tradable_after <= NOW()
@@ -287,15 +285,16 @@ _Giá base — không tính overprice do float/pattern. Tổng giá trị kho l�
 
 ## Unique constraints
 
-> _5 constraint đầu khai bằng `@unique`/`@@unique` trong `schema.prisma`. 2 câu SQL dưới đây Prisma **KHÔNG sinh được** → phải viết tay vào file migration sau khi `migrate dev` chạy xong._
+> _5 constraint đầu khai bằng `@unique`/`@@unique` trong `schema.prisma`. 3 câu SQL dưới đây Prisma **KHÔNG sinh được** → phải viết tay vào file migration sau khi `migrate dev` chạy xong._
 
-| Bảng             | Cột                                                   | Lý do                                                                                                                     |
-| ---------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `accounts`       | `account_name`                                        | Nhãn duy nhất để phân biệt acc **bằng mắt**. Trùng tên → dropdown và `GROUP BY` mất nghĩa                                 |
-| `accounts`       | `steam_id64`                                          | 2 row cùng id64 = 1 tài khoản Steam nhập 2 lần. _(Postgres cho nhiều `NULL` trong cột unique → acc chưa điền vẫn OK)_     |
-| `wallets`        | `(account_id, kind, currency)`                        | Mỗi acc chỉ 1 ví/1 loại tiền. F3 đổi vùng về lại currency cũ → **reactivate ví cũ** (`is_active = true`), không đẻ ví mới |
-| `item_prices`    | `(market_hash_name, source, fetched_at)`              | Chống cron chạy trùng ghi 2 dòng giá y hệt                                                                                |
-| `exchange_rates` | `(base_currency, quote_currency, source, fetched_at)` | Chống cron ghi trùng 2 dòng tỷ giá y hệt                                                                                  |
+| Bảng             | Cột                                                       | Lý do                                                                                                                     |
+| ---------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `accounts`       | `account_name`                                            | Nhãn duy nhất để phân biệt acc **bằng mắt**. Trùng tên → dropdown và `GROUP BY` mất nghĩa                                 |
+| `accounts`       | `steam_id64`                                              | 2 row cùng id64 = 1 tài khoản Steam nhập 2 lần. _(Postgres cho nhiều `NULL` trong cột unique → acc chưa điền vẫn OK)_     |
+| `wallets`        | `(account_id, kind, currency)`                            | Mỗi acc chỉ 1 ví/1 loại tiền. F3 đổi vùng về lại currency cũ → **reactivate ví cũ** (`is_active = true`), không đẻ ví mới |
+| `wallets `       | `(account_id)` WHERE kind = 'STEAM_BALANCE' AND is_active | Mỗi account tối đa 1 ví `STEAM_BALANCE` đang active                                                                       |
+| `item_prices`    | `(market_hash_name, source, fetched_at)`                  | Chống cron chạy trùng ghi 2 dòng giá y hệt                                                                                |
+| `exchange_rates` | `(base_currency, quote_currency, source, fetched_at)`     | Chống cron ghi trùng 2 dòng tỷ giá y hệt                                                                                  |
 
 ```sql
 -- ⚠️ Postgres coi NULL là KHÁC NHAU trong unique index → constraint
@@ -307,7 +306,14 @@ CREATE UNIQUE INDEX uq_wallet_cash ON wallets (kind, currency)
 -- CHECK cho invariant #11, vế DB (Prisma không sinh CHECK — viết tay vào migration)
 ALTER TABLE activities ADD CONSTRAINT chk_activity_account
   CHECK (account_id IS NOT NULL OR type = 'OPENING_BALANCE');
+
+-- Mỗi acc chỉ 1 ví STEAM_BALANCE đang active (F3 dựa vào luật này để tìm "ví hiện tại").
+-- Partial index — Prisma không sinh được, viết tay vào migration.
+CREATE UNIQUE INDEX uq_wallet_steam_active ON wallets (account_id)
+  WHERE kind = 'STEAM_BALANCE' AND is_active;
 ```
+
+> ⚠️ Kiểm seed trước khi viết migration: nếu seed gắn cả ví EUR lẫn VND_STEAM active vào cùng 1 acc thì migration nổ ngay.
 
 ---
 
@@ -379,15 +385,37 @@ CREATE INDEX idx_mov_item        ON item_movements(item_id, created_at);
 
 _Mọi luồng chạy trong **1 transaction duy nhất**._
 
-## F1. Khởi tạo vốn (`OPENING_BALANCE`)
+## F1.a. Khởi tạo vốn (`OPENING_BALANCE`)
 
 ```
 activities            type = OPENING_BALANCE
-                      occurred_at = LÙI VỀ TRƯỚC ngày mua item cũ nhất
+                      occurred_at = LÙI VỀ TRƯỚC mốc bắt đầu ghi sổ
+                      account_id = suy ra TỪ VÍ (ví CASH → NULL), không nhận từ input
 wallet_transactions   amount = +số dư đang có
 ```
 
-> Backdate `occurred_at`, **KHÔNG** backdate `created_at`.
+> - Tối đa 1 `OPENING_BALANCE` mỗi ví (invariant #12). Hai lần = nhập nhầm.
+> - Ví `STEAM_BALANCE`: `amount ≥ 0`.
+> - Ví `CASH`: âm hoặc dương đều hợp lệ, và không bắt buộc phải có.
+>   <br/> Ngữ nghĩa = _vị thế ròng trước mốc ghi sổ_, không phải tiền đang cầm.
+>   <br/> **Âm** = đã bỏ ra chưa thu về · **Dương** = đã lời.
+> - Backdate `occurred_at`, **KHÔNG** backdate `created_at`.
+
+## F1.b. Khởi tạo items (`OPENING_INVENTORY`)
+
+```
+activities            type = OPENING_INVENTORY, account_id = acc đang giữ đồ
+                      occurred_at = LÙI VỀ TRƯỚC mốc bắt đầu ghi sổ
+inventory_items       acquired_activity_id = activity
+                      acquired_price = NULL      ← không biết đã trả bao nhiêu
+                      cost_basis = 0             ← vốn ghi nhận = 0
+                      cost_currency = NULL
+                      status = HOLDING
+wallet_transactions   KHÔNG ghi
+item_movements        KHÔNG ghi
+```
+
+> Mốc ghi sổ là ranh giới một chiều. Mọi đồ tồn kho trước mốc đều dùng type này — kể cả đồ nhớ rõ là drop. Nhét đồ cũ vào DROP sẽ làm thống kê "acc nào cày ra nhiều đồ" sai mà trông vẫn có vẻ đúng, vì dữ liệu trước mốc chỉ nhớ được một phần. Nguồn gốc ghi vào note / metadata.
 
 ---
 
@@ -406,13 +434,29 @@ wallet_transactions   ví STEAM    +100.00 EUR
 ## F3. Chuyển ví / Đổi vùng Steam (`WALLET_TRANSFER`)
 
 ```
-activities            type = WALLET_TRANSFER
-wallet_transactions   ví EUR (cũ)   -50.00
-wallet_transactions   ví VND (mới)  +1.400.000
-wallets               ví EUR → is_active = false   (KHÔNG xoá)
-                      ví VND → nếu ĐÃ TỪNG có ví (account_id, STEAM_BALANCE, VND_STEAM): UPDATE is_active = true ← reactivate, KHÔNG insert
-                      ví VND → nếu chưa có: INSERT mới, cùng account_id
+Input     - accountId · toCurrency · amountIn (currency MỚI, người dùng nhập)
+          - oldBalanceOnSteam (số dư NHÌN THẤY trên Steam trước khi đổi)
+          - newWalletName · occurredAt
+
+Service   - amountOut = SUM(ví cũ)  ← service TỰ TÍNH, không nhận từ input
+          - so amountOut với oldBalanceOnSteam → lệch: THROW kèm số chênh, bắt nhập bù giao dịch thiếu trước.
 ```
+
+> ### _Thứ tự thao tác (quan trọng — uq_wallet_steam_active kiểm ngay từng câu):_
+
+```
+1. activities             type = WALLET_TRANSFER
+2. wallet_transactions    ví cũ  -amountOut        ← ghi TRƯỚC khi tắt ví
+3. wallets                ví cũ → is_active = false  (KHÔNG xoá)
+4. wallets                ví mới  → ĐÃ TỪNG có (account_id, STEAM_BALANCE, toCurrency): UPDATE is_active = true  ← reactivate
+                                → chưa có: INSERT mới, cùng account_id
+5. wallet_transactions    ví mới  +amountIn
+```
+
+> - **Không ghi tiền** vào ví `is_active = false` → `WALLET_INACTIVE`. Tắt ví cũ phải đứng sau bước 2, nếu không chính dòng rút tiền bị chặn.
+> - Bật ví mới trước khi tắt ví cũ → vi phạm `uq_wallet_steam_active`.
+> - `is_active` không làm số dư về 0. Số dư về 0 là nhờ dòng `-amountOut` ở _bước 2_ (nguyên tắc **#5: lưu sự kiện, suy ra trạng thái**).
+> - Đổi vùng là lúc **duy nhất** chắc chắn nhìn thấy số dư Steam thật → dùng làm điểm đối soát.
 
 ---
 
@@ -421,10 +465,16 @@ wallets               ví EUR → is_active = false   (KHÔNG xoá)
 **Mua trên Steam bằng balance:**
 
 ```
-activities            type = PURCHASE, counterparty = {"name":"Steam Market"}
+activities            type = PURCHASE,
+                      counterparty = {"name":"Steam Market"}
+
 wallet_transactions   ví STEAM  -12.50 EUR
-inventory_items       acquired_price = 12.50, cost_currency = 'EUR', cost_basis = 12.50
-                      status = HOLDING, tradable_after = NOW() + 7 ngày
+
+inventory_items       acquired_price = 12.50,
+                      cost_currency = 'EUR',
+                      cost_basis = 12.50,
+                      status = HOLDING,
+                      tradable_after = occurred_at + 7 ngày
 ```
 
 **Mua từ người bán FB bằng tiền mặt:**
@@ -449,17 +499,43 @@ _Làm tròn lẻ → **dư dồn item cuối**._
 
 ---
 
-## F5. Nhận đồ Free (`DROP`)
+## F5.a. Nhận đồ Free - Weekly drop (`DROP`)
 
 ```
-activities            type = DROP, account_id = ACC CÀY
-inventory_items       acquired_price = 0, cost_basis = 0, cost_currency = NULL
-                      account_id = ACC CÀY, tradable_after = NOW() + 7 ngày
+activities            type = DROP,
+                      account_id = ACC CÀY
+
+inventory_items       acquired_price = 0,
+                      cost_basis = 0,
+                      cost_currency = NULL
+                      account_id = ACC CÀY,
+                      tradable_after = occurred_at+ 7 ngày
+
+wallet_transactions   KHÔNG ghi
+
+item_movements        KHÔNG ghi
+```
+
+> - `activities.account_id` giữ acc cày **vĩnh viễn** → trả lời được _"acc nào drop ra nhiều đồ giá trị nhất"_.
+> - **Chỉ dùng cho drop xảy ra SAU mốc ghi sổ**. Đồ tồn trước mốc → `OPENING_INVENTORY` (F1b).
+
+## F5.b. Nhận đồ Giveaway (`GIFT_IN`)
+
+```
+activities            type = GIFT_IN, account_id = acc nhận
+                      counterparty = {"name":"Shop X giveaway","fb":"..."}   ← BẮT BUỘC
+inventory_items       acquired_activity_id = activity
+                      acquired_price = 0 ← chắc chắn không trả đồng nào
+                      cost_basis = 0, cost_currency = NULL
+                      status = HOLDING, tradable_after = +7 ngày
 wallet_transactions   KHÔNG ghi
 item_movements        KHÔNG ghi
 ```
 
-> `activities.account_id` giữ acc cày **vĩnh viễn** → trả lời được _"acc nào drop ra nhiều đồ giá trị nhất"_.
+> - Bao mọi trường hợp nhận đồ free từ người khác: _trúng giveaway_, _bạn tặng_,
+>   _bù thêm khi trade lệch_. Chi tiết nằm ở `counterparty`, không đẻ type riêng cho từng loại.
+> - Phân biệt `acquired_price: 0` = chắc chắn không trả gì (`DROP, GIFT_IN`) ·
+>   `NULL` = khái niệm giá mua _không áp dụng_ / _không biết_ (`TRADE_UP`, `OPENING_INVENTORY`).
 
 ---
 
@@ -467,7 +543,7 @@ item_movements        KHÔNG ghi
 
 ```
 inventory_items       UPDATE account_id = acc đích
-                      UPDATE tradable_after = NOW() + 7 ngày
+                      UPDATE tradable_after = occurred_at + 7 ngày
 item_movements        INSERT: from, to, hold_ends_at
 activities + wallet   KHÔNG CHẠM
 ```
@@ -525,15 +601,18 @@ item_movements        KHÔNG ghi
 ## F9. Trade-up (`TRADE_UP`)
 
 ```
-activities            type = TRADE_UP
-inventory_items (10)  status = CONSUMED, consumed_activity_id = activity
-inventory_items (1)   INSERT mới
-                      acquired_activity_id = activity
-                      acquired_price = NULL          ← không mua bằng tiền
-                      cost_basis = SUM(cost_basis 10 món)
-                      cost_currency = currency của nguyên liệu
-                      tradable_after = NOW() + 7 ngày
-wallet_transactions   KHÔNG ghi
+activities            - type = TRADE_UP
+
+inventory_items (10)  - status = CONSUMED, consumed_activity_id = activity
+
+inventory_items (1)   - INSERT mới
+                      - acquired_activity_id = activity
+                      - acquired_price = NULL ← không mua bằng tiền
+                      - cost_basis = SUM(cost_basis 10 món)
+                      - cost_currency = currency của nguyên liệu
+                      - tradable_after = occurred_at + 7 ngày
+
+wallet_transactions   - KHÔNG ghi
 ```
 
 > **1 activity vừa là giấy chứng tử của 10 món, vừa là giấy khai sinh của 1 món.**
@@ -551,10 +630,12 @@ SELECT * FROM inventory_items WHERE acquired_activity_id = :tradeup_id;  -- thà
 
 ```
 activities            type = UNBOXING
+
 inventory_items       Hòm → CONSUMED
                       Key → CONSUMED
+
 inventory_items       INSERT đồ mới, cost_basis = vốn hòm + vốn key
-                      tradable_after = NOW() + 7 ngày
+                      tradable_after = occurred_at + 7 ngày
 ```
 
 > **Key luôn là item** _(mua trước bằng `PURCHASE`)_. Không bao giờ trừ thẳng tiền key khỏi ví.
@@ -594,6 +675,8 @@ inventory_items       status = WRITTEN_OFF, consumed_activity_id = activity
                       sale_* = NULL toàn bộ
 wallet_transactions   KHÔNG ghi
 ```
+
+> Vế ngược lại là `GIFT_IN (F5b)` — nhận đồ free từ người khác.
 
 ---
 
@@ -686,16 +769,19 @@ WHERE i.status = 'HOLDING';
 
 # INVARIANT — phải test
 
-| #   | Luật                                                                                                | Kiểm ở đâu                                                                                        |
-| --- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| 1   | Mọi `wallet_transaction` có `activity_id`                                                           | DB constraint                                                                                     |
-| 2   | `TOP_UP` luôn tạo đúng 2 dòng ví                                                                    | Service                                                                                           |
-| 3   | `PURCHASE`: `SUM(cost_basis)` = `\|amount\|` ví                                                     | Service                                                                                           |
-| 4   | `SALE`: `SUM(sale_price)` = `amount` ví                                                             | Service                                                                                           |
-| 5   | Ví `STEAM_BALANCE` không âm                                                                         | Service — **_backdate thì WARNING, vẫn ghi_**                                                     |
-| 6   | Item `SOLD`/`CONSUMED`/`WRITTEN_OFF` bắt buộc có `consumed_activity_id`                             | Service                                                                                           |
-| 7   | Transfer không đụng `acquired_/consumed_activity_id`                                                | Test                                                                                              |
-| 8   | `items.account_id` khớp movement mới nhất                                                           | Test                                                                                              |
-| 9   | Trade-up: vốn nguyên liệu = vốn thành phẩm                                                          | Test                                                                                              |
-| 10  | `cost_currency` = currency của ví đã trả                                                            | Service                                                                                           |
-| 11  | `activities.account_id` NULL **chỉ khi** `type = OPENING_BALANCE` **và** ví liên quan `kind = CASH` | Vế 1: DB constraint (`chk_activity_account`) · Vế 2: Service — DB không tham chiếu chéo bảng được |
+| #   | Luật                                                                                                                                                                                                                     | Kiểm ở đâu                                                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| 1   | Mọi `wallet_transaction` có `activity_id`                                                                                                                                                                                | DB constraint                                                                                     |
+| 2   | `TOP_UP` luôn tạo đúng 2 dòng ví                                                                                                                                                                                         | Service                                                                                           |
+| 3   | `PURCHASE`: `SUM(cost_basis)` = `\|amount\|` ví                                                                                                                                                                          | Service                                                                                           |
+| 4   | `SALE`: `SUM(sale_price)` = `amount` ví                                                                                                                                                                                  | Service                                                                                           |
+| 5   | Ví `STEAM_BALANCE` không âm <br/>Backdate = occurredAt < MAX(occurred_at) của chính ví đó (so với sổ của ví, không so với đồng hồ). <br/> - Nối cuối sổ mà âm → THROW <br/> - Chèn giữa lịch sử mà âm → WARNING, vẫn ghi | Service — **_backdate thì WARNING, vẫn ghi_**                                                     |
+| 6   | Item `SOLD`/`CONSUMED`/`WRITTEN_OFF` bắt buộc có `consumed_activity_id`                                                                                                                                                  | Service                                                                                           |
+| 7   | Transfer không đụng `acquired_/consumed_activity_id`                                                                                                                                                                     | Test                                                                                              |
+| 8   | `items.account_id` khớp movement mới nhất                                                                                                                                                                                | Test                                                                                              |
+| 9   | Trade-up: vốn nguyên liệu = vốn thành phẩm                                                                                                                                                                               | Test                                                                                              |
+| 10  | `cost_currency` = currency của ví đã trả                                                                                                                                                                                 | Service                                                                                           |
+| 11  | `activities.account_id` NULL **chỉ khi** `type = OPENING_BALANCE` **và** ví liên quan `kind = CASH`                                                                                                                      | Vế 1: DB constraint (`chk_activity_account`) · Vế 2: Service — DB không tham chiếu chéo bảng được |
+| 12  | Chỉ duy nhất 1 `OPENING_BALANCE` mỗi ví                                                                                                                                                                                  | Service                                                                                           |
+
+> Note **#5**: Chèn giữa lịch sử không làm số dư hiện tại lệch (`SUM` không quan tâm thứ tự) — chỉ làm đường số dư trong quá khứ có thể tạm âm khi chưa nhập đủ giao dịch. Chặn hẳn sẽ khiến mọi lần quên ghi thành không sửa được. Kiểm đường số dư quá khứ → Bước 7, window function.
