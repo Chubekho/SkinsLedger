@@ -3,8 +3,10 @@
 import { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "./client.js";
 
-export function withTx<T>(
-  fn: (tx: Prisma.TransactionClient) => Promise<T>,
-): Promise<T> {
-  return prisma.$transaction(fn);
+declare const txBrand: unique symbol;
+
+export type Tx = Prisma.TransactionClient & { readonly [txBrand]: true };
+
+export async function withTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (tx) => fn(tx as Tx));
 }
