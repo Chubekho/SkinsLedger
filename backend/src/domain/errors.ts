@@ -12,6 +12,8 @@ export const DOMAIN_ERROR_CODES = [
   'STEAM_BALANCE_MISMATCH',
   'ACTIVITY_ACCOUNT_RULE',
   'VOID_NOT_SUPPORTED',
+  'EMPTY_ENTRIES',
+  'LOCK_ORDER_VIOLATION'
 ] as const;
 
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
