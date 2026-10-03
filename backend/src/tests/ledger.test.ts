@@ -7,7 +7,7 @@ import {
 } from "../services/ledger.js";
 import { withTx, type Tx } from "../db/tx.js";
 import { resetDb } from "./helpers/reset-db.js";
-import { makeAccount, makeWallet, seedBalance } from "./fixtures.js";
+import { makeAccount, makeWallet, seedBalance } from "./helpers/fixtures.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../db/client.js";
 
