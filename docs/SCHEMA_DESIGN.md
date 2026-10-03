@@ -1,6 +1,6 @@
 # SKINSLEDGER — THIẾT KẾ DATABASE
 
-**Version 3.3** — _cập nhật 24/09/2026 (chốt gốc 05/08/2026)_
+**Version 3.3** — _cập nhật 03/10/2026 (chốt gốc 05/08/2026)_
 
 ---
 
@@ -104,14 +104,13 @@
 | **occurred_at** | DATETIME                      | _Ngày xảy ra thực tế._ **Backdate được**                                                                 |
 | **created_at**  | DATETIME                      | _Ngày nhập liệu._ **Không bao giờ sửa**                                                                  |
 
-> **Không lưu tỷ giá nạp.** `TOP_UP` luôn ghi **2 dòng cùng `activity_id`** → tỷ giá suy ra được:
->
+> - **Không lưu tỷ giá nạp.** `TOP_UP` luôn ghi **2 dòng cùng `activity_id`** → tỷ giá suy ra được:
 > ```
 > ví CASH  -2.100.000 VND  ┐ activity #1
 > ví STEAM   +100.00 EUR   ┘  → giá nạp = 2.100.000 / 100 = 21.000
 > ```
->
-> Lưu thêm cột là tạo nguồn sự thật thứ hai, có ngày sẽ lệch.
+> - Lưu thêm cột là tạo nguồn sự thật thứ hai, có ngày sẽ lệch.
+> - **`amount ≠ 0`.** Dòng tiền bằng 0 không đóng góp gì cho `SUM`, chỉ làm sổ nhiễu → mọi luồng đều chặn (`AMOUNT_ZERO`).
 
 ---
 
@@ -396,9 +395,8 @@ wallet_transactions   amount = +số dư đang có
 
 > - Tối đa 1 `OPENING_BALANCE` mỗi ví (invariant #12). Hai lần = nhập nhầm.
 > - Ví `STEAM_BALANCE`: `amount > 0`.
-> - **Opening phải là sự kiện sớm nhất của ví** (invariant #13):
->   `occurredAt < MIN(occurred_at)` các dòng hiện có của ví, so nhỏ hơn hẳn.
->   Vi phạm → THROW. Khác `isBackdated` (MAX, thuộc #5): hai luật độc lập.
+> - **Opening phải là sự kiện sớm nhất của ví** (invariant #13): `occurredAt < MIN(occurred_at)` các dòng hiện có của ví, so nhỏ hơn hẳn. Vi phạm → THROW. Khác `isBackdated` (MAX, thuộc #5): hai luật độc lập.
+> - Ví `CASH`: `amount` được **âm** (vị thế đang đầu tư tính đến mốc ghi sổ), không được 0.
 
 ## F1.b. Khởi tạo items (`OPENING_INVENTORY`)
 
