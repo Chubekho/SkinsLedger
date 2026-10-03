@@ -54,7 +54,7 @@ export async function getWalletBalance(
     _sum: { amount: true },
     where: { walletId },
   });
-  return result._sum.amount ?? Prisma.Decimal(0);
+  return result._sum.amount ?? new Prisma.Decimal("0");
 }
 
 export async function getLatestOccurredAt(
@@ -94,7 +94,7 @@ export async function assertCanApply(
   const balance = agg._sum.amount ?? new Prisma.Decimal(0);
   const latest = agg._max.occurredAt;
 
-  if (balance.plus(amount).isNegative()) {
+  if (balance.plus(amount).lt(0)) {
     if (isBackdated(occurredAt, latest)) {
       return {
         code: "BACKDATED_NEGATIVE_BALANCE",
