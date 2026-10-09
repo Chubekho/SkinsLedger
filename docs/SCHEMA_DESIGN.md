@@ -1,6 +1,6 @@
 # SKINSLEDGER — THIẾT KẾ DATABASE
 
-**Version 3.3** — _cập nhật 03/10/2026 (chốt gốc 05/08/2026)_
+**Version 3.4** — _cập nhật 09/10/2026 (chốt gốc 05/08/2026)_
 
 ---
 
@@ -105,10 +105,12 @@
 | **created_at**  | DATETIME                      | _Ngày nhập liệu._ **Không bao giờ sửa**                                                                  |
 
 > - **Không lưu tỷ giá nạp.** `TOP_UP` luôn ghi **2 dòng cùng `activity_id`** → tỷ giá suy ra được:
+>
 > ```
 > ví CASH  -2.100.000 VND  ┐ activity #1
 > ví STEAM   +100.00 EUR   ┘  → giá nạp = 2.100.000 / 100 = 21.000
 > ```
+>
 > - Lưu thêm cột là tạo nguồn sự thật thứ hai, có ngày sẽ lệch.
 > - **`amount ≠ 0`.** Dòng tiền bằng 0 không đóng góp gì cho `SUM`, chỉ làm sổ nhiễu → mọi luồng đều chặn (`AMOUNT_ZERO`).
 
@@ -395,8 +397,10 @@ wallet_transactions   amount = +số dư đang có
 
 > - Tối đa 1 `OPENING_BALANCE` mỗi ví (invariant #12). Hai lần = nhập nhầm.
 > - Ví `STEAM_BALANCE`: `amount > 0`.
-> - **Opening phải là sự kiện sớm nhất của ví** (invariant #13): `occurredAt < MIN(occurred_at)` các dòng hiện có của ví, so nhỏ hơn hẳn. Vi phạm → THROW. Khác `isBackdated` (MAX, thuộc #5): hai luật độc lập.
-> - Ví `CASH`: `amount` được **âm** (vị thế đang đầu tư tính đến mốc ghi sổ), không được 0.
+> - **Opening phải là sự kiện sớm nhất của ví** (invariant #13), áp **cả hai chiều**, so nhỏ/lớn **hơn hẳn**, vi phạm → THROW:
+>   - Ghi opening sau → `occurredAt < MIN(occurred_at)` các dòng hiện có (`OPENING_BALANCE_NOT_FIRST`).
+>   - Ghi dòng tiền khác sau opening → `occurredAt >` mốc opening (`ENTRY_BEFORE_OPENING`).
+>   - Khác `isBackdated` (MAX, thuộc #5): hai luật độc lập.
 
 ## F1.b. Khởi tạo items (`OPENING_INVENTORY`)
 
@@ -425,6 +429,11 @@ activities            type = TOP_UP
 wallet_transactions   ví CASH   -2.100.000 VND
 wallet_transactions   ví STEAM    +100.00 EUR
 ```
+
+> - Input là **hai số dương**: service tự đổi dấu (trừ ví CASH, cộng ví STEAM). Số ≤ 0 → THROW (`AMOUNT_NOT_POSITIVE`).
+> - Mỗi ví đúng vai: ví trừ tiền `kind = CASH`, ví nhận `kind = STEAM_BALANCE`. Sai vai → THROW (`WALLET_KIND_MISMATCH`).
+> - `activities.account_id` = account của ví Steam, không nhận từ input.
+> - Không lưu tỷ giá: suy từ hai dòng cùng `activity_id` (xem mục 3 và recipe "Tỷ giá nạp").
 
 ---
 
@@ -780,6 +789,6 @@ WHERE i.status = 'HOLDING';
 | 10  | `cost_currency` = currency của ví đã trả                                                                                                                                                                                                                                                  | Service                                                                                           |
 | 11  | `activities.account_id` NULL **chỉ khi** `type = OPENING_BALANCE` **và** ví liên quan `kind = CASH`                                                                                                                                                                                       | Vế 1: DB constraint (`chk_activity_account`) · Vế 2: Service — DB không tham chiếu chéo bảng được |
 | 12  | Chỉ duy nhất 1 `OPENING_BALANCE` mỗi ví                                                                                                                                                                                                                                                   | Service                                                                                           |
-| 13  | Mỗi `OPENING_BALANCE` phải sớm hơn hẳn mọi dòng tiền hiện có của ví đó                                                                                                                                                                                                                    | Service                                                                                           |
+| 13  | Mỗi `OPENING_BALANCE` phải sớm hơn hẳn mọi dòng tiền hiện có của ví đó: <br/> - Vế 1: opening ghi sau phải sớm hơn mọi dòng hiện có. <br/> - Vế 2: dòng tiền ghi sau opening phải muộn hơn hẳn mốc opening.                                                                               | Service                                                                                           |
 
 > Note **#5**: Chèn giữa lịch sử không làm số dư hiện tại lệch (`SUM` không quan tâm thứ tự) — chỉ làm đường số dư trong quá khứ có thể tạm âm khi chưa nhập đủ giao dịch. Chặn hẳn sẽ khiến mọi lần quên ghi thành không sửa được. Kiểm đường số dư quá khứ → Bước 7, window function.

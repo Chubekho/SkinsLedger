@@ -53,25 +53,34 @@ Cần "bây giờ" thì nhận qua tham số.
 6. **Mã lỗi mới vào đúng nhóm trong `DOMAIN_ERROR_CODES`**, không append cuối mảng.
    Nhóm theo khái niệm bị vi phạm: Wallet · Amount & currency · Balance · Opening balance · Activity/ledger.
 
+7. **Khoá từ 2 ví trở lên → `lockWallets(tx, [idA, idB])`**, không tự `lockWallet` từng cái.
+   Hàm khoá theo id TĂNG DẦN rồi trả về theo thứ tự ĐẦU VÀO. Thứ tự khoá chỉ để chống
+   deadlock: theo id thì mọi luồng tự đi cùng một chiều, theo vai trò (cash trước) thì
+   mỗi luồng mới phải nhớ luồng khác khoá chiều nào.
+
 ---
 
 ## Bản đồ luật → nơi cài
 
-| Luật                                         | Nơi cài                              | Mã lỗi                       |
-| -------------------------------------------- | ------------------------------------ | ---------------------------- |
-| #1 mọi `wallet_transaction` có `activity_id` | DB FK + cấu trúc `recordActivity`    | —                            |
-| #5 ví Steam không âm                         | `assertCanApply()`                   | `INSUFFICIENT_STEAM_BALANCE` |
-| #5 backdate → warning                        | `assertCanApply()` + `isBackdated()` | `BACKDATED_NEGATIVE_BALANCE` |
-| #11 vế 1                                     | DB `chk_activity_account`            | —                            |
-| #11 vế 2                                     | `assertActivityAccountRule()`        | `ACTIVITY_ACCOUNT_RULE`      |
-| #12 một opening mỗi ví                       | `recordOpeningBalance()`             | `OPENING_BALANCE_EXISTS`     |
-| #13 opening sớm nhất sổ ví                   | `recordOpeningBalance()`             | `OPENING_BALANCE_NOT_FIRST`  |
-| C7 scale                                     | `assertFitsScale()`                  | `AMOUNT_SCALE_EXCEEDED`      |
-| C4 ví inactive                               | `assertCanApply()`                   | `WALLET_INACTIVE`            |
-| amount ≠ 0                                   | `assertNonZero()`                    | `AMOUNT_ZERO`                |
-| ví Steam: opening không âm                   | `recordOpeningBalance()`             | `OPENING_BALANCE_NEGATIVE`   |
-| thứ tự khoá (Lab 4b)                         | `recordActivity()`                   | `LOCK_ORDER_VIOLATION`       |
-| activity không có dòng tiền                  | `recordActivity()`                   | `EMPTY_ENTRIES`              |
+| Luật                                           | Nơi cài                                         | Mã lỗi                       |
+| ---------------------------------------------- | ----------------------------------------------- | ---------------------------- |
+| #1 mọi `wallet_transaction` có `activity_id`   | DB FK + cấu trúc `recordActivity`               | —                            |
+| #2 `TOP_UP` đúng 2 dòng ví                     | cấu trúc `entries` của `recordTopUp()`          | —                            |
+| #5 ví Steam không âm                           | `assertCanApply()`                              | `INSUFFICIENT_STEAM_BALANCE` |
+| #5 backdate → warning                          | `assertCanApply()` + `isBackdated()`            | `BACKDATED_NEGATIVE_BALANCE` |
+| #11 vế 1                                       | DB `chk_activity_account`                       | —                            |
+| #11 vế 2                                       | `assertActivityAccountRule()`                   | `ACTIVITY_ACCOUNT_RULE`      |
+| #12 một opening mỗi ví                         | `recordOpeningBalance()`                        | `OPENING_BALANCE_EXISTS`     |
+| #13 vế 1: opening sớm nhất sổ ví               | `recordOpeningBalance()`                        | `OPENING_BALANCE_NOT_FIRST`  |
+| #13 vế 2: dòng tiền sau opening                | `assertAfterOpening()` (trong `recordActivity`) | `ENTRY_BEFORE_OPENING`       |
+| F2: hai số tiền > 0                            | `assertPositive()`                              | `AMOUNT_NOT_POSITIVE`        |
+| F2: mỗi ví đúng vai (`CASH` / `STEAM_BALANCE`) | `assertWalletKind()`                            | `WALLET_KIND_MISMATCH`       |
+| C7 scale                                       | `assertFitsScale()`                             | `AMOUNT_SCALE_EXCEEDED`      |
+| C4 ví inactive                                 | `assertCanApply()`                              | `WALLET_INACTIVE`            |
+| `amount ≠ 0`                                   | `assertNonZero()`                               | `AMOUNT_ZERO`                |
+| ví Steam: opening không âm                     | `recordOpeningBalance()`                        | `OPENING_BALANCE_NEGATIVE`   |
+| Thứ tự khoá (Lab 4b)                           | `recordActivity()`                              | `LOCK_ORDER_VIOLATION`       |
+| `activity` không có dòng tiền                  | `recordActivity()`                              | `EMPTY_ENTRIES`              |
 
 > #11 vế 2, #12, #13 không làm bằng UNIQUE được: mỗi luật cần cột từ hai bảng khác nhau, mà index không trải qua hai bảng.
 
@@ -85,9 +94,11 @@ Cổng duy nhất tạo `activity` + `wallet_transactions`. Caller phải:
 - `entries` nhận `LockedWallet`, không nhận `walletId`: kiểu dữ liệu ép phải khoá trước. Quy ước biến thành thứ TS kiểm được.
 - `occurredAt` truyền MỘT lần, dùng chung cho `activities` lẫn mọi `wallet_transactions`. Cột này lặp ở 2 bảng (phục vụ `idx_wt_wallet_time`).
 
-Đã kiểm sẵn — **service con đừng lặp lại**: `AMOUNT_ZERO` · `AMOUNT_SCALE_EXCEEDED` · `ACTIVITY_ACCOUNT_RULE` · `WALLET_INACTIVE` · #5 · `EMPTY_ENTRIES` · `LOCK_ORDER_VIOLATION`.
+Đã kiểm sẵn — **service con đừng lặp lại**: `AMOUNT_ZERO` · `AMOUNT_SCALE_EXCEEDED` · `ACTIVITY_ACCOUNT_RULE` · `WALLET_INACTIVE` · `#5` · `#13 vế 2`(`ENTRY_BEFORE_OPENING`, mọi ví kể cả CASH) · `EMPTY_ENTRIES` · `LOCK_ORDER_VIOLATION`
 
 Mọi phép kiểm chạy **trước** mọi câu ghi → một entry lỗi thì không ghi entry nào.
+
+#12 **không** kiểm ở đây, nó thuộc F1. Gọi thẳng `recordActivity` với `OPENING_BALANCE` là đi vòng qua #12, giống `seedBalance`.
 
 Chữ ký: `recordActivity(tx, { type, accountId, occurredAt, note?, counterparty?, entries })` — `entries` nằm TRONG object, không phải tham số thứ ba.
 
@@ -105,19 +116,29 @@ Chữ ký: `recordOpeningBalance(tx, { walletId, amount: string, occurredAt, not
   `OPENING_BALANCE_NOT_FIRST`. Zero, scale, inactive, #11, #5 do
   `recordActivity` kiểm — đừng lặp lại.
 
+## Hợp đồng `recordTopUp`
+
+Chữ ký: `recordTopUp(tx, { cashWalletId, steamWalletId, cashAmount: string, steamAmount: string, occurredAt, note? })` → `{ activityId, warnings }`.
+
+- Hai số đều DƯƠNG, người gọi không tự đổi dấu: service trừ cash (`.neg()`), cộng Steam.
+- Vai trò lấy theo tham số, `kind` chỉ được **kiểm** (`assertWalletKind`). Truyền đảo vai hoặc cùng một id → `WALLET_KIND_MISMATCH`, không tự "sửa giúp".
+- `accountId` suy từ ví Steam, không nhận từ input.
+- Thứ tự: parse + `assertPositive` (thuần, TRƯỚC khi giữ khoá) → `lockWallets` → `assertWalletKind` ×2 → dựng `entries` sắp theo `wallet.id` → `recordActivity`.
+- Không lưu tỷ giá: suy từ 2 dòng cùng `activity_id` (recipe "Tỷ giá nạp" trong `SCHEMA_DESIGN.md`).
+
 ---
 
 ## Hai luật dễ nhầm: MAX vs MIN
 
-|         | `isBackdated()` — `MAX` | #13 — `MIN`                |
-| ------- | ----------------------- | -------------------------- |
-| Thuộc   | #5, **mọi luồng**       | **Chỉ F1**                 |
-| Hỏi     | Chèn vào giữa lịch sử?  | Opening có đứng đầu sổ ví? |
-| Hậu quả | Đổi throw → warning     | Throw hẳn                  |
+|         | `isBackdated()` — `MAX` | #13 — `MIN`                                             |
+| ------- | ----------------------- | ------------------------------------------------------- |
+| Thuộc   | #5, **mọi luồng**       | **F1** (vế 1) + **mọi luồng** qua recordActivity (vế 2) |
+| Hỏi     | Chèn vào giữa lịch sử?  | Opening có đứng đầu sổ ví?                              |
+| Hậu quả | Đổi throw → warning     | Throw hẳn                                               |
 
-Độc lập nhau, cùng tồn tại. Opening ví Steam luôn dương nên **không bao giờ** chạm
-nhánh warning của #5 — thiếu #13 thì không gì chặn opening nằm giữa sổ, và đường số dư
-quá khứ (Bước 7, window function) vẽ sai.
+> Độc lập nhau, cùng tồn tại. Opening ví Steam luôn dương nên **không bao giờ** chạm nhánh warning của #5 — thiếu #13 thì không gì chặn opening nằm giữa sổ, và đường số dư quá khứ (Bước 7, window function) vẽ sai.
+
+> #13 vế 2 cũng không nhờ #5 được: `TOP_UP` vào ví Steam là số dương, backdate trước opening không bao giờ làm ví âm nên #5 im lặng.
 
 ---
 
@@ -125,11 +146,12 @@ quá khứ (Bước 7, window function) vẽ sai.
 
 - `domain/errors.ts` — `DomainError` · `isDomainError` · type `DomainWarning` · `DOMAIN_ERROR_CODES` (chia nhóm theo khái niệm)
 - `domain/money.ts` — `CURRENCY_SCALE` · `roundToScale` · `assertFitsScale`
-- `domain/ledger-rules.ts` — `assertActivityAccountRule` · `isBackdated` · `assertNonZero`
+- `domain/ledger-rules.ts` — `assertActivityAccountRule` · `isBackdated` · `assertNonZero` · `assertPositive` · `assertWalletKind`
 - `db/tx.ts` — `withTx` · type `Tx` (branded)
-- `services/ledger.ts` — `lockWallet` · `getWalletBalance` · `getLatestOccurredAt` · `assertCanApply` · `recordActivity` · type `LockedWallet`, `LedgerEntry`
+- `services/ledger.ts` — `lockWallet` · `lockWallets` · `getWalletBalance` · `getLatestOccurredAt` · `getOpeningEntry` · `assertCanApply` · `assertAfterOpening` · `recordActivity` · type `LockedWallet`, `LedgerEntry`
 - `services/opening-balance.ts` — `recordOpeningBalance`
-- `tests/helpers/fixtures.ts` — `makeAccount` · `makeWallet` · `makeSteamWallet` · `seedBalance`
+- `services/top-up.ts` — `recordTopUp`
+- `tests/helpers/fixtures.ts` — `makeAccount` · `makeWallet` · `makeSteamWallet` (trả `{ account, wallet }`) · `makeCashWallet` (trả `wallet`, VND, không account) · `seedBalance`
 - `tests/helpers/assertions.ts` — `expectDomainError` · `expectBalance`
 - `tests/helpers/reset-db.ts` — `resetDb`
 
