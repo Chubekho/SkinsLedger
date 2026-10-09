@@ -1,7 +1,7 @@
 import { type Tx } from "../db/tx.js";
 import { type DomainWarning, DomainError } from "../domain/errors.js";
 import { Prisma } from "../generated/prisma/client.js";
-import { lockWallet, recordActivity } from "./ledger.js";
+import { getOpeningEntry, lockWallet, recordActivity } from "./ledger.js";
 
 export async function recordOpeningBalance(
   tx: Tx,
@@ -19,15 +19,7 @@ export async function recordOpeningBalance(
     );
 
   // #12
-  const existingOpening = await tx.walletTransaction.findFirst({
-    select: { activityId: true },
-    where: {
-      walletId,
-      activity: {
-        type: "OPENING_BALANCE",
-      },
-    },
-  });
+  const existingOpening = await getOpeningEntry(tx, walletId);
 
   if (existingOpening)
     throw new DomainError(

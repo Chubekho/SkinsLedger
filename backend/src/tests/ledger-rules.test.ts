@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   assertActivityAccountRule,
+  assertPositive,
+  assertWalletKind,
   isBackdated,
 } from "../domain/ledger-rules.js";
+import { withTx } from "../db/tx.js";
+import { Prisma } from "../generated/prisma/client.js";
+import { expectDomainError } from "./helpers/assertions.js";
+import { makeSteamWallet } from "./helpers/fixtures.js";
 
 describe("Assert activity account rule", () => {
   it("Opening ví CASH được phép không có accountId", () => {
@@ -103,5 +109,45 @@ describe("isBackdated", () => {
 
   it("bằng đúng giao dịch mới nhất → không phải backdate", () => {
     expect(isBackdated(new Date("2026-09-10"), latest)).toBe(false);
+  });
+});
+
+const d = (v: string) => new Prisma.Decimal(v);
+
+describe("assertPositive()", () => {
+  it("mọi số dương → không ném", () => {
+    expect(() => assertPositive({ a: d("0.01"), b: d("100") })).not.toThrow();
+  });
+
+  // it.each: chạy cùng một test cho từng giá trị, %s được thay bằng giá trị đó
+  it.each(["-36", "0", "-0"])("'%s' → AMOUNT_NOT_POSITIVE", (raw) => {
+    expect(() => assertPositive({ a: d(raw) })).toThrow(
+      expect.objectContaining({ code: "AMOUNT_NOT_POSITIVE" }),
+    );
+  });
+
+  it("nhiều trường sai → details liệt kê đủ, trường đúng không có mặt", () => {
+    expect(() => assertPositive({ a: d("-1"), b: d("5"), c: d("0") })).toThrow(
+      expect.objectContaining({
+        code: "AMOUNT_NOT_POSITIVE",
+        details: { nonPositive: { a: "-1", c: "0" } },
+      }),
+    );
+  });
+});
+
+describe("assertWalletKind()", () => {
+  it("kind khớp → không ném", () => {
+    expect(() => assertWalletKind({ id: 1, kind: "CASH" }, "CASH")).not.toThrow();
+  });
+
+  it("kind khác → WALLET_KIND_MISMATCH, details ghi expected/actual", () => {
+    // truyền object thường, không cần DB: chữ ký kiểu cấu trúc cho phép
+    expect(() => assertWalletKind({ id: 7, kind: "STEAM_BALANCE" }, "CASH")).toThrow(
+      expect.objectContaining({
+        code: "WALLET_KIND_MISMATCH",
+        details: { walletId: 7, expected: "CASH", actual: "STEAM_BALANCE" },
+      }),
+    );
   });
 });

@@ -46,6 +46,28 @@ export async function lockWallet(
   return rows[0];
 }
 
+export async function lockWallets<T extends number[]>(
+  tx: Tx,
+  ids: [...T],
+): Promise<{ [K in keyof T]: LockedWallet }> {
+  const setIds = new Set<number>(ids);
+  const sortedId = [...setIds].sort((a, b) => a - b);
+
+  const lockedWallets: LockedWallet[] = [];
+  for (const id of sortedId) {
+    const wallet = await lockWallet(tx, id);
+    lockedWallets.push(wallet);
+  }
+
+  return ids.map((id) => {
+    const wallet = lockedWallets.find((w) => w.id === id);
+    if (wallet === undefined)
+      throw new Error(`unreachable: wallet ${id} was locked but not found`);
+
+    return wallet;
+  }) as { [K in keyof T]: LockedWallet };
+}
+
 export async function getWalletBalance(
   tx: Tx,
   walletId: number,
@@ -66,6 +88,20 @@ export async function getLatestOccurredAt(
     where: { walletId },
   });
   return result._max.occurredAt;
+}
+
+export async function getOpeningEntry(
+  tx: Tx,
+  walletId: number,
+): Promise<{ activityId: number; occurredAt: Date } | null> {
+  const result = await tx.walletTransaction.findFirst({
+    where: { walletId, activity: { type: "OPENING_BALANCE" } },
+    select: { activityId: true, occurredAt: true },
+  });
+
+  if (result === null) return null;
+
+  return { activityId: result.activityId, occurredAt: result.occurredAt };
 }
 
 export async function assertCanApply(
@@ -123,6 +159,28 @@ export async function assertCanApply(
   return null;
 }
 
+export async function assertAfterOpening( // hàm này thay vì truyền cả wallet vào thì truyền mỗi id của wallet thôi có được k ? T nghĩ là hoàn toàn được.
+  tx: Tx,
+  wallet: LockedWallet,
+  occurredAt: Date,
+): Promise<void> {
+  const opening = await getOpeningEntry(tx, wallet.id);
+
+  if (opening === null) return;
+
+  if (occurredAt <= opening.occurredAt)
+    throw new DomainError(
+      "ENTRY_BEFORE_OPENING",
+      `Entry on wallet ${wallet.id} at ${occurredAt.toISOString()} must be strictly after its opening balance (${opening.occurredAt.toISOString()}). Use a later date.`,
+      {
+        walletId: wallet.id,
+        occurredAt: occurredAt.toISOString(),
+        openingOccurredAt: opening.occurredAt.toISOString(),
+        openingActivityId: opening.activityId,
+      },
+    );
+}
+
 export async function recordActivity(
   tx: Tx,
   input: {
@@ -163,6 +221,7 @@ export async function recordActivity(
 
   const warnings: DomainWarning[] = [];
   for (const e of entries) {
+    await assertAfterOpening(tx, e.wallet, occurredAt);
     const warning = await assertCanApply(tx, e.wallet, e.amount, occurredAt);
     if (warning !== null) warnings.push(warning);
   }

@@ -45,6 +45,9 @@ export async function makeSteamWallet(
   return { account, wallet };
 }
 
+export const makeCashWallet = async (tx: Tx) =>
+  makeWallet(tx, { kind: "CASH", currency: "VND" });
+
 /** Dựng số dư sẵn có mà KHÔNG đi qua service đang được test. */
 export async function seedBalance(
   tx: Tx,

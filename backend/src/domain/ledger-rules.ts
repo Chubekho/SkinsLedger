@@ -29,15 +29,6 @@ export function assertActivityAccountRule(input: {
   }
 }
 
-export function isBackdated(
-  occurredAt: Date,
-  latestOccurredAt: Date | null,
-): boolean {
-  if (latestOccurredAt === null) return false;
-
-  return occurredAt < latestOccurredAt;
-}
-
 export function assertNonZero(amount: Prisma.Decimal): void {
   if (amount.isZero())
     throw new DomainError(
@@ -45,4 +36,40 @@ export function assertNonZero(amount: Prisma.Decimal): void {
       "Wallet transaction amount must not be zero",
       { amount: amount.toString() },
     );
+}
+
+export function assertWalletKind(
+  wallet: { id: number; kind: WalletKind },
+  expected: WalletKind,
+): void {
+  if (wallet.kind !== expected)
+    throw new DomainError(
+      "WALLET_KIND_MISMATCH",
+      `Wallet ${wallet.id} must be ${expected}, got ${wallet.kind}`,
+      { walletId: wallet.id, expected, actual: wallet.kind },
+    );
+}
+
+export function assertPositive(amounts: Record<string, Prisma.Decimal>): void {
+  const nonPositive: Record<string, string> = {};
+  for (const [field, value] of Object.entries(amounts)) {
+    if (value.lte(0)) nonPositive[field] = value.toString();
+  }
+
+  const fields = Object.keys(nonPositive); 
+  if (fields.length > 0)
+    throw new DomainError(
+      "AMOUNT_NOT_POSITIVE",
+      `Amounts must be positive: ${fields.join(", ")}`,
+      { nonPositive },
+    );
+}
+
+export function isBackdated(
+  occurredAt: Date,
+  latestOccurredAt: Date | null,
+): boolean {
+  if (latestOccurredAt === null) return false;
+
+  return occurredAt < latestOccurredAt;
 }

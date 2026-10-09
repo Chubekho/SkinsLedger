@@ -1,15 +1,23 @@
+import { Prisma } from "../generated/prisma/client.js";
+import { prisma } from "../db/client.js";
 import { describe, it, expect, beforeEach } from "vitest";
+import { withTx, type Tx } from "../db/tx.js";
 import {
   assertCanApply,
   getWalletBalance,
   lockWallet,
+  lockWallets,
   recordActivity,
 } from "../services/ledger.js";
-import { withTx, type Tx } from "../db/tx.js";
 import { resetDb } from "./helpers/reset-db.js";
-import { makeAccount, makeWallet, seedBalance } from "./helpers/fixtures.js";
-import { Prisma } from "../generated/prisma/client.js";
-import { prisma } from "../db/client.js";
+import {
+  makeAccount,
+  makeCashWallet,
+  makeSteamWallet,
+  makeWallet,
+  seedBalance,
+} from "./helpers/fixtures.js";
+import { expectBalance, expectDomainError } from "./helpers/assertions.js";
 
 beforeEach(async () => {
   await resetDb();
@@ -17,17 +25,7 @@ beforeEach(async () => {
 
 const T1 = new Date("2026-09-01T00:00:00Z");
 const T2 = new Date("2026-09-10T00:00:00Z");
-
-/** 1 account + 1 ví Steam EUR. */
-async function makeSteam(tx: Tx) {
-  const account = await makeAccount(tx);
-  const wallet = await makeWallet(tx, {
-    kind: "STEAM_BALANCE",
-    currency: "EUR",
-    accountId: account.id,
-  });
-  return { account, wallet };
-}
+const T3 = new Date("2026-09-20T00:00:00Z");
 
 describe("lockWallet", () => {
   it("id không tồn tại → WALLET_NOT_FOUND", async () => {
@@ -38,7 +36,7 @@ describe("lockWallet", () => {
 
   it("map đúng từng cột snake_case sang camelCase", async () => {
     const { account, wallet, locked } = await withTx(async (tx) => {
-      const { account, wallet } = await makeSteam(tx);
+      const { account, wallet } = await makeSteamWallet(tx);
       return { account, wallet, locked: await lockWallet(tx, wallet.id) };
     });
 
@@ -64,7 +62,7 @@ describe("lockWallet", () => {
 describe("getWalletBalance", () => {
   it("ví rỗng → 0, không phải null", async () => {
     const balance = await withTx(async (tx) => {
-      const { wallet } = await makeSteam(tx);
+      const { wallet } = await makeSteamWallet(tx);
       return getWalletBalance(tx, wallet.id);
     });
 
@@ -73,7 +71,7 @@ describe("getWalletBalance", () => {
 
   it("cộng đúng nhiều dòng", async () => {
     const balance = await withTx(async (tx) => {
-      const { account, wallet } = await makeSteam(tx);
+      const { account, wallet } = await makeSteamWallet(tx);
       await seedBalance(tx, wallet.id, "50", T1, account.id);
       await seedBalance(tx, wallet.id, "12.34", T2, account.id);
       return getWalletBalance(tx, wallet.id);
@@ -87,7 +85,7 @@ describe("assertCanApply", () => {
   it("ví Steam có 50, rút 80 nối cuối sổ → INSUFFICIENT_STEAM_BALANCE", async () => {
     await expect(
       withTx(async (tx) => {
-        const { account, wallet } = await makeSteam(tx);
+        const { account, wallet } = await makeSteamWallet(tx);
         const locked = await lockWallet(tx, wallet.id);
         await seedBalance(tx, wallet.id, "50", T1, account.id);
         return assertCanApply(tx, locked, new Prisma.Decimal("-80"), T2);
@@ -99,7 +97,7 @@ describe("assertCanApply", () => {
 
   it("ví Steam có 50, rút 80 chèn giữa lịch sử → warning, không throw", async () => {
     const warning = await withTx(async (tx) => {
-      const { account, wallet } = await makeSteam(tx);
+      const { account, wallet } = await makeSteamWallet(tx);
       const locked = await lockWallet(tx, wallet.id);
       await seedBalance(tx, wallet.id, "50", T2, account.id);
       return assertCanApply(tx, locked, new Prisma.Decimal("-80"), T1);
@@ -135,7 +133,7 @@ describe("assertCanApply", () => {
   it("số lẻ vượt scale của ví → AMOUNT_SCALE_EXCEEDED", async () => {
     await expect(
       withTx(async (tx) => {
-        const { wallet } = await makeSteam(tx);
+        const { wallet } = await makeSteamWallet(tx);
         const locked = await lockWallet(tx, wallet.id);
         return assertCanApply(tx, locked, new Prisma.Decimal("12.505"), T1);
       }),
@@ -147,7 +145,7 @@ describe("assertCanApply", () => {
   it("amount = 0 → AMOUNT_ZERO", async () => {
     await expect(
       withTx(async (tx) => {
-        const { wallet } = await makeSteam(tx);
+        const { wallet } = await makeSteamWallet(tx);
         const locked = await lockWallet(tx, wallet.id);
         return assertCanApply(tx, locked, new Prisma.Decimal("0"), T1);
       }),
@@ -159,7 +157,7 @@ describe("recordActivity", () => {
   it("TOP_UP mà accountId null → ACTIVITY_ACCOUNT_RULE", async () => {
     await expect(
       withTx(async (tx) => {
-        const { wallet } = await makeSteam(tx);
+        const { wallet } = await makeSteamWallet(tx);
         const locked = await lockWallet(tx, wallet.id);
         return recordActivity(tx, {
           type: "TOP_UP",
@@ -176,7 +174,7 @@ describe("recordActivity", () => {
   it("OPENING_BALANCE ví Steam mà accountId null → ACTIVITY_ACCOUNT_RULE", async () => {
     await expect(
       withTx(async (tx) => {
-        const { wallet } = await makeSteam(tx);
+        const { wallet } = await makeSteamWallet(tx);
         const locked = await lockWallet(tx, wallet.id);
         return recordActivity(tx, {
           type: "OPENING_BALANCE",
@@ -192,8 +190,8 @@ describe("recordActivity", () => {
 
   it("OPENING_BALANCE ví CASH accountId null → ghi đúng 1 activity + 1 dòng tiền", async () => {
     const { activityId, warnings } = await withTx(async (tx) => {
-      const wallet = await makeWallet(tx, { kind: "CASH", currency: "VND" });
-      const locked = await lockWallet(tx, wallet.id);
+      const cashWallet = await makeCashWallet(tx);
+      const locked = await lockWallet(tx, cashWallet.id);
       return recordActivity(tx, {
         type: "OPENING_BALANCE",
         accountId: null,
@@ -215,7 +213,6 @@ describe("recordActivity", () => {
     expect(activity.occurredAt).toEqual(T1);
     expect(activity.walletTransactions).toHaveLength(1);
     expect(activity.walletTransactions[0]?.amount.toString()).toBe("36");
-    // occurred_at của activity và của dòng tiền phải bằng nhau
     expect(activity.walletTransactions[0]?.occurredAt).toEqual(T1);
   });
 
@@ -291,5 +288,114 @@ describe("recordActivity", () => {
 
     expect(await prisma.activity.count()).toBe(0);
     expect(await prisma.walletTransaction.count()).toBe(0);
+  });
+});
+
+describe("recordActivity() — #13 vế 2: dòng tiền phải sau opening", () => {
+  async function writeEntry(
+    tx: Tx,
+    walletId: number,
+    accountId: number,
+    occurredAt: Date,
+  ) {
+    const wallet = await lockWallet(tx, walletId);
+    return recordActivity(tx, {
+      type: "TOP_UP",
+      accountId,
+      occurredAt,
+      entries: [{ wallet, amount: new Prisma.Decimal("10") }],
+    });
+  }
+  
+  it("ghi TRƯỚC mốc opening → ENTRY_BEFORE_OPENING", async () => {
+    await expectDomainError(
+      withTx(async (tx) => {
+        const { account, wallet } = await makeSteamWallet(tx);
+        await seedBalance(tx, wallet.id, "100", T2, account.id); // opening
+        await writeEntry(tx, wallet.id, account.id, T1);
+      }),
+      "ENTRY_BEFORE_OPENING",
+    );
+  });
+
+  it("ghi BẰNG mốc opening → ENTRY_BEFORE_OPENING", async () => {
+    await expectDomainError(
+      withTx(async (tx) => {
+        const { account, wallet } = await makeSteamWallet(tx);
+        await seedBalance(tx, wallet.id, "100", T2, account.id);
+        await writeEntry(tx, wallet.id, account.id, T2);
+      }),
+      "ENTRY_BEFORE_OPENING",
+    );
+  });
+
+  it("ghi SAU mốc opening → qua", async () => {
+    await withTx(async (tx) => {
+      const { account, wallet } = await makeSteamWallet(tx);
+      await seedBalance(tx, wallet.id, "100", T2, account.id);
+      await writeEntry(tx, wallet.id, account.id, T3);
+      await expectBalance(tx, wallet.id, "110");
+    });
+  });
+
+  it("ví chưa có opening → ghi mốc nào cũng qua", async () => {
+    await withTx(async (tx) => {
+      const { account, wallet } = await makeSteamWallet(tx);
+      await writeEntry(tx, wallet.id, account.id, T1);
+      await expectBalance(tx, wallet.id, "10");
+    });
+  });
+
+  it("id ví khác id activity opening → vẫn tìm đúng opening của ví", async () => {
+    await expectDomainError(
+      withTx(async (tx) => {
+        await makeSteamWallet(tx); // ví nháp, chiếm id 1
+        const { account, wallet } = await makeSteamWallet(tx);
+        await seedBalance(tx, wallet.id, "100", T2, account.id); // activity id 1
+        await writeEntry(tx, wallet.id, account.id, T1);
+      }),
+      "ENTRY_BEFORE_OPENING",
+    );
+  });
+
+  it("ví CASH có opening, ghi trước mốc → vẫn bị chặn", async () => {
+    await expectDomainError(
+      withTx(async (tx) => {
+        const cash = await makeCashWallet(tx);
+        const account = await makeAccount(tx); // TOP_UP bắt buộc có accountId (chk_activity_account)
+        await seedBalance(tx, cash.id, "-500000", T2, null);
+        await writeEntry(tx, cash.id, account.id, T1);
+      }),
+      "ENTRY_BEFORE_OPENING",
+    );
+  });
+});
+
+describe("lockWallets()", () => {
+  it("trả về theo thứ tự đầu vào, kể cả khi id truyền vào giảm dần", async () => {
+    await withTx(async (tx) => {
+      const { wallet: low } = await makeSteamWallet(tx);
+      const { wallet: high } = await makeSteamWallet(tx); // tạo sau → id lớn hơn
+      const result = await lockWallets(tx, [high.id, low.id]); // truyền giảm dần
+      expect(result.map((w) => w.id)).toEqual([high.id, low.id]);
+    });
+  });
+
+  it("cùng một id hai lần → cùng ví ở cả hai vị trí, không lỗi", async () => {
+    await withTx(async (tx) => {
+      const { wallet } = await makeSteamWallet(tx);
+      const [x, y] = await lockWallets(tx, [wallet.id, wallet.id]);
+      expect([x.id, y.id]).toEqual([wallet.id, wallet.id]);
+    });
+  });
+
+  it("một id không tồn tại → WALLET_NOT_FOUND", async () => {
+    await expectDomainError(
+      withTx(async (tx) => {
+        const { wallet } = await makeSteamWallet(tx);
+        await lockWallets(tx, [wallet.id, 999999]);
+      }),
+      "WALLET_NOT_FOUND",
+    );
   });
 });

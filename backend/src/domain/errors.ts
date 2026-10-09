@@ -19,6 +19,7 @@ export const DOMAIN_ERROR_CODES = [
   "OPENING_BALANCE_EXISTS",
   "OPENING_BALANCE_NEGATIVE",
   "OPENING_BALANCE_NOT_FIRST",
+  "ENTRY_BEFORE_OPENING",
 
   // ── Activity / ledger (recordActivity, voidActivity) ────
   "ACTIVITY_ACCOUNT_RULE",
